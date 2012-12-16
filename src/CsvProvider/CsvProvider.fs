@@ -12,26 +12,10 @@ open System.IO
 open System.Reflection
 open System.Text.RegularExpressions
 open Microsoft.FSharp.Core.CompilerServices
+open Microsoft.FSharp.Quotations
 open ProviderImplementation.ProvidedTypes
 open ProviderImplementation.StructureInference
-
-// --------------------------------------------------------------------------------------
-// Runtime representation of CSV file
-// --------------------------------------------------------------------------------------
-
-/// Simple type that represents a single CSV row
-type CsvRow internal (data:string[]) =
-  member x.Columns = data
-
-// Simple type wrapping CSV data
-type CsvFile private (text:string) =
-  // Cache the sequence of all data lines (all lines but the first)
-  let lines = text.Split([| '\n'; '\r' |], StringSplitOptions.RemoveEmptyEntries)
-  let lines =  [| for line in lines -> line.Split(',') |]
-  let data = lines |> Seq.skip 1 |> Seq.map (fun d -> CsvRow(d)) |> Array.ofSeq
-  member x.Data = data
-  member x.Headers = lines |> Seq.head
-  static member Parse(data) = new CsvFile(data)
+open FSharp.Data.Csv
 
 // --------------------------------------------------------------------------------------
 // Inference
@@ -64,46 +48,89 @@ module CsvInference =
 //
 // --------------------------------------------------------------------------------------
 
-module internal CsvTypeBuilder = 
-  let generateCsvType (domainType:ProvidedTypeDefinition) = function
-    | Collection(SingletonMap(_, (_, Record(_, fields)))) ->
-        let objectTy = ProvidedTypeDefinition("Row", Some(typeof<CsvRow>))
-        domainType.AddMember(objectTy)
+module private Quotations =
 
-        for index, field in fields |> Seq.mapi (fun i v -> i, v) do
-          let baseTyp, propTyp =
-            match field.Type with
-            | Primitive(typ, Some unit) -> 
-                typ, ProvidedMeasureBuilder.Default.AnnotateType(typ, [unit])
-            | Primitive(typ, None) -> typ, typ
-            | _ -> typeof<string>, typeof<string>
+    open System.Collections.Generic
+    open Microsoft.FSharp.Quotations.ExprShape
+    open Microsoft.FSharp.Quotations.Patterns
 
-          let p = ProvidedProperty(NameUtils.nicePascalName field.Name, propTyp)
-          let _, conv = Conversions.convertValue field.Name false baseTyp
-          p.GetterCode <- fun (Singleton row) -> conv <@@ Some((%%row:CsvRow).Columns.[index]) @@> 
-          objectTy.AddMember(p)
+    let replaceType (fromAsm, toAsm : Assembly) (t : Type) =
+        if t.Assembly = fromAsm then
+            toAsm.GetType t.FullName
+        else
+            t
 
-        objectTy
-    | _ -> failwith "generateCsvType: Type inference returned wrong type"
+    let replaceMember (fromAsm, toAsm : Assembly) (m : 'a when 'a :> MemberInfo) =
+        if m.DeclaringType.Assembly = fromAsm then
+            let t = toAsm.GetType m.DeclaringType.FullName
+            t.GetMember(m.Name, m.MemberType, BindingFlags.Instance ||| BindingFlags.Static ||| BindingFlags.Public ||| BindingFlags.NonPublic) |> Seq.exactlyOne :?> 'a
+        else
+            m
+
+    let replaceVar (fromAsm, toAsm : Assembly) (varTable: IDictionary<_,_>) reversePass (v: Var) =
+        if reversePass then
+            // store the mappings as we'll have to revert them later
+            if v.Type.Assembly = fromAsm then
+                assert (reversePass)
+                let newVar = Var (v.Name, toAsm.GetType v.Type.FullName, v.IsMutable)
+                varTable.Add(newVar, v)
+                newVar
+            else
+                v
+        else
+            if v.Type.Assembly = fromAsm then
+                varTable.[v]
+            else
+                v
+
+    let rec replaceExpr replacement (varTable: IDictionary<_,_>) reversePass quotation =
+        let re = replaceExpr replacement varTable reversePass
+        let rt = replaceType replacement
+        let inline rm m = replaceMember replacement m
+        let rv = replaceVar replacement varTable reversePass
+
+        match quotation with
+        | Call (expr, m, exprs) -> 
+            match expr with
+            | Some expr -> Expr.Call (re expr, rm m, List.map re exprs)
+            | None -> Expr.Call (rm m, List.map re exprs)
+        | PropertyGet (expr, p, exprs) -> 
+            match expr with
+            | Some expr -> Expr.PropertyGet (re expr, rm p, List.map re exprs)
+            | None -> Expr.PropertyGet (rm p, List.map re exprs)
+        | ShapeVar v -> 
+            Expr.Var (rv v)
+        | ShapeLambda (v, expr) -> 
+            Expr.Lambda (rv v, re expr)
+        | ShapeCombination (o, exprs) -> 
+            RebuildShapeCombination (o, List.map re exprs)
 
 // --------------------------------------------------------------------------------------
+
+open System.Collections.Generic
 
 [<TypeProvider>]
 type public CsvProvider(cfg:TypeProviderConfig) as this =
   inherit TypeProviderForNamespaces()
 
   // Generate namespace and type 'FSharp.Data.JsonProvider'
-  let asm = System.Reflection.Assembly.GetExecutingAssembly()
+  let asm = Assembly.LoadFrom cfg.RuntimeAssembly
+
   let ns = "FSharp.Data"
-  let xmlProvTy = ProvidedTypeDefinition(asm, ns, "CsvProvider", Some(typeof<obj>))
+  let xmlProvTy = ProvidedTypeDefinition(asm, ns, "CsvProvider", Some typeof<obj>)
+
+  let variablesTable = new Dictionary<Var,Var>()
+  let fixType = Quotations.replaceType (Assembly.GetExecutingAssembly(), asm)
+  let fixTypes = Quotations.replaceExpr (Assembly.GetExecutingAssembly(), asm) variablesTable false
+  let fixTypesReverse = Quotations.replaceExpr (asm, Assembly.GetExecutingAssembly()) variablesTable true
 
   let buildTypes (typeName:string) (args:obj[]) =
 
     // Generate the required type with empty constructor
-    let resTy = ProvidedTypeDefinition(asm, ns, typeName, Some(typeof<CsvFile>))
+    let resTy = ProvidedTypeDefinition(asm, ns, typeName, Some (fixType typeof<CsvFile>))
 
     // A type that is used to hide all generated domain types
-    let domainTy = ProvidedTypeDefinition("DomainTypes", Some(typeof<obj>))
+    let domainTy = ProvidedTypeDefinition("DomainTypes", Some typeof<obj>)
     resTy.AddMember(domainTy)
 
     // Infer the schema from a specified file or URI sample
@@ -112,26 +139,51 @@ type public CsvProvider(cfg:TypeProviderConfig) as this =
       with _ -> failwith "Specified argument is not a well-formed CSV file."
     let infered = CsvInference.inferType sample Int32.MaxValue
 
-    let ctx = domainTy
-    let methResTy = CsvTypeBuilder.generateCsvType ctx infered
+    let (|Singleton|) = function Singleton s -> fixTypesReverse s
 
-    // 'Data' proeprty has the generated type
+    let generateCsvType (domainType:ProvidedTypeDefinition) = function
+        | Collection(SingletonMap(_, (_, Record(_, fields)))) ->
+            let objectTy = ProvidedTypeDefinition("Row", Some (fixType typeof<CsvRow>))
+            domainType.AddMember(objectTy)
+
+            for index, field in fields |> Seq.mapi (fun i v -> i, v) do
+              let baseTyp, propTyp =
+                match field.Type with
+                | Primitive(typ, Some unit) -> 
+                    typ, ProvidedMeasureBuilder.Default.AnnotateType(typ, [unit])
+                | Primitive(typ, None) -> typ, typ
+                | _ -> typeof<string>, typeof<string>
+
+              let p = ProvidedProperty(NameUtils.nicePascalName field.Name, propTyp)
+              let _, conv = Conversions.convertValue field.Name false baseTyp fixType
+              let conv = conv >> fixTypes
+              p.GetterCode <- fun (Singleton row) -> conv <@@ Some((%%row:CsvRow).Columns.[index]) @@> 
+              objectTy.AddMember(p)
+
+            objectTy
+        | _ -> failwith "generateCsvType: Type inference returned wrong type"
+
+
+    let ctx = domainTy
+    let methResTy = generateCsvType ctx infered
+
+    // 'Data' property has the generated type
     let p = ProvidedProperty("Data", methResTy.MakeArrayType())
-    p.GetterCode <- fun (Singleton self) -> <@@ (%%self : CsvFile).Data @@>
+    p.GetterCode <- fun (Singleton self) -> fixTypes <@@ (%%self : CsvFile).Data @@>
     resTy.AddMember(p)
     
     // Generate static Parse method
     let args = [ ProvidedParameter("source", typeof<string>) ]
     let m = ProvidedMethod("Parse", args, resTy)
     m.IsStaticMethod <- true
-    m.InvokeCode <- fun (Singleton source) -> <@@ CsvFile.Parse(%%source) @@>
+    m.InvokeCode <- fun (Singleton source) -> fixTypes <@@ CsvFile.Parse(%%source) @@>
     resTy.AddMember(m)
 
     // Generate static Load method
     let args =  [ ProvidedParameter("path", typeof<string>) ]
     let m = ProvidedMethod("Load", args, resTy)
     m.IsStaticMethod <- true
-    m.InvokeCode <- fun (Singleton source) -> <@@ CsvFile.Parse(File.ReadAllText(%%source)) @@>
+    m.InvokeCode <- fun (Singleton source) -> fixTypes <@@ CsvFile.Parse(File.ReadAllText(%%source)) @@>
     resTy.AddMember(m)
 
     // Return the generated type
