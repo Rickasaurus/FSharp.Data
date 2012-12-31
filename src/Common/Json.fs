@@ -32,7 +32,11 @@ type JsonValue =
       | JsonValue.Number number -> sb.Append(number.ToString(invariant))
       | JsonValue.BigNumber number -> sb.Append(number.ToString(invariant))
       | JsonValue.String t -> 
+#if PORTABLE
+          sb.Append("\"" + t.Replace("\"", "\\\"") + "\"")
+#else
           sb.Append("\"" + System.Web.HttpUtility.JavaScriptStringEncode(t) + "\"")
+#endif
       | JsonValue.Object properties -> 
           let isNotFirst = ref false
           sb.Append "{"  |> ignore

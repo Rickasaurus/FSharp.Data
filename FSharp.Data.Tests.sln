@@ -12,7 +12,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Samples", "Samples", "{7E48
 		samples\XmlProvider.fsx = samples\XmlProvider.fsx
 	EndProjectSection
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FSharp.Data.Tests", "tests\FSharp.Data.Tests.fsproj", "{5EF9FF95-1C75-458A-983A-168E43945913}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FSharp.Data.Tests", "tests\FSharp.Data.Tests\FSharp.Data.Tests.fsproj", "{5EF9FF95-1C75-458A-983A-168E43945913}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documents", "Documents", "{78CB4667-C0B2-487E-8D48-84FFD8DBF9AA}"
 	ProjectSection(SolutionItems) = preProject
@@ -29,6 +29,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{EF9F7922
 		tools\template.html = tools\template.html
 	EndProjectSection
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FSharp.Data.Tests.Portable", "tests\FSharp.Data.Portable.Tests\FSharp.Data.Tests.Portable.fsproj", "{4079A120-EB4C-467E-A67C-9242C95D44A7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{5EF9FF95-1C75-458A-983A-168E43945913}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5EF9FF95-1C75-458A-983A-168E43945913}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5EF9FF95-1C75-458A-983A-168E43945913}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4079A120-EB4C-467E-A67C-9242C95D44A7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4079A120-EB4C-467E-A67C-9242C95D44A7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4079A120-EB4C-467E-A67C-9242C95D44A7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4079A120-EB4C-467E-A67C-9242C95D44A7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

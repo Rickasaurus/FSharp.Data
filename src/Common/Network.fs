@@ -11,6 +11,8 @@ open System.Text
 open System.Reflection
 open System.Collections.Generic
 
+#if PORTABLE
+#else
 /// Utilities for working with network via HTTP. Includes methods for downloading 
 /// resources with specified headers, query parameters and HTTP body
 type Http private() = 
@@ -107,3 +109,4 @@ type Http private() =
   static member Request(url:string, ?query, ?headers, ?meth, ?body) = 
     Http.AsyncRequest(url, ?headers=headers, ?query=query, ?meth=meth, ?body=body)
     |> Async.RunSynchronously
+#endif

@@ -125,43 +125,12 @@ module GlobalProviderHelpers =
 
 
 module Conversions = 
-  open System
-  open System.Globalization
   open Microsoft.FSharp.Quotations
-
-  /// Convert the result of TryParse to option type
-  let asOption = function true, v -> Some v | _ -> None
-
-  type Operations =
-    // Operations that convert string to supported primitive types
-    static member ConvertString = Option.map (fun (s:string) -> s)
-    static member ConvertDateTime = Option.bind (fun s -> 
-      DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None) |> asOption)
-    static member ConvertInteger = Option.bind (fun s -> 
-      Int32.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture) |> asOption)
-    static member ConvertInteger64 = Option.bind (fun s -> 
-      Int64.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture) |> asOption)
-    static member ConvertDecimal = Option.bind (fun s -> 
-      Decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture) |> asOption)
-    static member ConvertFloat = Option.bind (fun s -> 
-      Double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture) |> asOption)
-    static member ConvertBoolean = Option.bind (function 
-        | StringEquals "true" | StringEquals "yes" -> Some true
-        | StringEquals "false" | StringEquals "no" -> Some false
-        | _ -> None)
-
-    /// Operation that extracts the value from an option and reports a
-    /// meaningful error message when the value is not there
-    static member GetNonOptionalAttribute<'T>(name, opt:option<'T>) : 'T = 
-      match opt with 
-      | Some v -> v
-      | None when typeof<'T> = typeof<string> -> Unchecked.defaultof<'T>
-      | None when typeof<'T> = typeof<DateTime> -> Unchecked.defaultof<'T>
-      | _ -> failwithf "Mismatch: %s is missing" name
+  open FSharp.Data.Conversions
 
   /// Creates a function that takes Expr<string option> and converts it to 
   /// an expression of other type - the type is specified by `typ` and 
-  let convertValue message optional typ = 
+  let convertValue message optional typ fixType = 
     let returnTyp = if optional then typedefof<option<_>>.MakeGenericType [| typ |] else typ
     returnTyp, fun e ->
       let converted = 
@@ -174,6 +143,6 @@ module Conversions =
         elif typ = typeof<DateTime> then <@@ Operations.ConvertDateTime(%%e) @@>
         else failwith "convertValue: Unsupported primitive type"
       if not optional then 
-        ReflectionHelpers.makeMethodCall typeof<Operations> "GetNonOptionalAttribute"
+        ReflectionHelpers.makeMethodCall (fixType typeof<Operations>) "GetNonOptionalAttribute"
           [ typ ] [ Expr.Value message; converted]
       else converted

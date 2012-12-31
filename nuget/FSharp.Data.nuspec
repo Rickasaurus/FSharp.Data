@@ -17,7 +17,11 @@
     <dependencies />
   </metadata>
   <files>
-    <file src="..\bin\v40\*.dll" target="lib/net40" />
-    <file src="..\bin\v40\*.pdb" target="lib/net40" />
+    <file src="..\bin\*.dll" target="lib/net40" />
+    <file src="..\bin\*.pdb" target="lib/net40" />
+    <file src="..\bin\*.xml" target="lib/net40" />
+    <file src="..\bin\Portable\*.dll" target="lib/portable-net4+sl4+wp71+win8" />
+    <file src="..\bin\Portable\*.pdb" target="lib/portable-net4+sl4+wp71+win8" />
+    <file src="..\bin\Portable\*.xml" target="lib/portable-net4+sl4+wp71+win8" />
   </files>
 </package>
